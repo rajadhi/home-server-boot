@@ -1,4 +1,64 @@
 #!/usr/bin/env bash
+# Default milestone: Ansible runs on Ubuntu. Use HS_MODE=full for the legacy rebuild.
+if [ "${HS_MODE:-hello}" = hello ]; then
+  set -euo pipefail
+  [ "$(id -u)" -eq 0 ] || { echo 'Run with sudo from the Ubuntu console.' >&2; exit 1; }
+  # shellcheck source=/dev/null
+  . /etc/os-release
+  [ "$ID" = ubuntu ] && [ "$VERSION_ID" = 26.04 ] || { echo 'Requires Ubuntu 26.04.' >&2; exit 1; }
+  [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ] || { echo 'Run at the Ubuntu console for firewall changes.' >&2; exit 1; }
+  ADMIN=${SUDO_USER:-}
+  [ -n "$ADMIN" ] && [ "$ADMIN" != root ] || { echo 'Run sudo as your normal Ubuntu user.' >&2; exit 1; }
+  HS_HELLO_REF=${HS_HELLO_REF:-72e40cb215d4c59bb51d91a8a9df6ad41af3d2d6}
+  [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
+  install -d -m 0755 /opt/home-server-hello
+  exec 9>/run/lock/home-server-hello.lock
+  flock -n 9 || { echo 'Another hello bootstrap is running.' >&2; exit 1; }
+  exec > >(tee -a /var/log/home-server-hello.log) 2>&1
+  printf 'Hello bootstrap: %s, configuration %s\n' "$(date -Is)" "$HS_HELLO_REF"
+  export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
+  timeout --foreground -k 10 300 apt-get update
+  timeout --foreground -k 10 600 apt-get install -y ansible git gh ca-certificates
+  if [ -n "${HS_TEST_BUNDLE:-}" ]; then
+    if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
+      echo "Test bundles require a marked disposable VM." >&2; exit 1
+    fi
+    [ -f "$HS_TEST_BUNDLE" ] || { echo "Missing test bundle." >&2; exit 1; }
+  elif ! sudo -u "$ADMIN" -H gh auth status --hostname github.com >/dev/null 2>&1; then
+    printf '\nAuthenticate the private configuration repo using the device code below.\n'
+    sudo -u "$ADMIN" -H gh auth login --hostname github.com --git-protocol https --web
+  fi
+  # Git evaluates this credential helper later; keep the substitution deferred.
+  # shellcheck disable=SC2016
+  HELPER='!f() { echo username=x-access-token; echo "password=$(sudo -u '"$ADMIN"' -H gh auth token)"; }; f'
+  hello_git() { timeout --foreground -k 10 180 git -c credential.helper= -c "credential.helper=$HELPER" "$@"; }
+  REPOSITORY=${HS_TEST_BUNDLE:-https://github.com/rajadhi/home-server.git}
+  SOURCE=/opt/home-server-hello/source
+  if [ ! -d "$SOURCE/.git" ]; then
+    hello_git clone --no-checkout "$REPOSITORY" "$SOURCE"
+  fi
+  if [ -n "${HS_TEST_BUNDLE:-}" ]; then
+    hello_git -C "$SOURCE" fetch "$REPOSITORY" HEAD
+  else
+    hello_git -C "$SOURCE" fetch origin "$HS_HELLO_REF"
+  fi
+  git -C "$SOURCE" checkout --detach "$HS_HELLO_REF"
+  test "$(git -C "$SOURCE" rev-parse HEAD)" = "$HS_HELLO_REF"
+  export ANSIBLE_CONFIG="$SOURCE/ansible/hello.cfg" ANSIBLE_COLLECTIONS_PATH=/opt/home-server-hello/collections
+  timeout --foreground -k 10 300 ansible-galaxy collection install -r "$SOURCE/ansible/hello-requirements.yml" -p "$ANSIBLE_COLLECTIONS_PATH"
+  export HS_APPLY_REVISION="$HS_HELLO_REF"
+  EXTRA=()
+  if [ -n "${HS_HELLO_LAN:-}" ]; then
+    LAN_JSON=$(python3 -c 'import ipaddress,json,os; print(json.dumps({"hello_world_lan": str(ipaddress.IPv4Network(os.environ["HS_HELLO_LAN"]))}))')
+    EXTRA=(-e "$LAN_JSON")
+  fi
+  cd "$SOURCE/ansible"
+  timeout --foreground -k 15 900 ansible-playbook -i localhost, -c local hello-world.yml "${EXTRA[@]}"
+  printf '\nReady: http://<ubuntu-ip>:17283/\nLog: /var/log/home-server-hello.log\n'
+  exit 0
+fi
+[ "${HS_MODE:-}" = full ] || { echo 'HS_MODE must be hello or full.' >&2; exit 1; }
+
 # home-server bootstrap: bare Ubuntu Server 26.x -> the whole server, from the private home-server repo.
 # This is the ONLY imperative script; everything after it is declared in Ansible.
 #
@@ -28,6 +88,7 @@ ask()  { local v; read -r -p "$1" v </dev/tty; printf '%s' "$v"; }
 [ "$(id -u)" -eq 0 ] || die "run with sudo"
 ADMIN=${SUDO_USER:-}; [ -n "$ADMIN" ] && [ "$ADMIN" != root ] || die "run with sudo from the admin user's account"
 ADMIN_HOME=$(getent passwd "$ADMIN" | cut -d: -f6)
+# shellcheck source=/dev/null
 . /etc/os-release
 [ "$ID" = ubuntu ] && [ "${VERSION_ID%%.*}" = 26 ] || die "needs Ubuntu 26.x (found $PRETTY_NAME)"
 [ -t 0 ] || [ -r /dev/tty ] || die "needs a terminal for the prompts"
@@ -49,7 +110,7 @@ apt-get install -y -qq git gh ansible curl ca-certificates >/dev/null
 if [ "$HS_SKIP_GH" != 1 ]; then
   say "GitHub login (as $ADMIN). Open the link on your phone and enter the code shown."
   if ! sudo -u "$ADMIN" -H gh auth status --hostname github.com >/dev/null 2>&1; then
-    sudo -u "$ADMIN" -H gh auth login --hostname github.com --git-protocol https --web </dev/tty
+    sudo -u "$ADMIN" -H gh auth login --hostname github.com --git-protocol https --web
   fi
   sudo -u "$ADMIN" -H gh auth setup-git --hostname github.com
 fi
@@ -66,6 +127,8 @@ chmod 0600 /etc/home-server/vault-pass
 
 # --- 4. code ----------------------------------------------------------------------------------------
 say "Downloading home-server ($HS_REF)"
+# Git evaluates this credential helper later; keep the substitution deferred.
+# shellcheck disable=SC2016
 HELPER='!f() { echo username=x-access-token; echo "password=$(sudo -u '"$ADMIN"' -H gh auth token)"; }; f'
 if [ "$HS_SKIP_GH" = 1 ]; then g() { git "$@"; }; else g() { git -c credential.helper= -c "credential.helper=$HELPER" "$@"; }; fi
 [ -d "$ROOT_CHECKOUT/.git" ] || g clone --quiet "$HS_REPO_URL" "$ROOT_CHECKOUT"
@@ -95,7 +158,11 @@ fi
 
 say "Second run: must report changed=0"
 ansible-playbook site.yml -e "remote_session=$REMOTE" "${VM_ARGS[@]}" </dev/null | tee /tmp/home-server-second-run.txt | tail -4
-grep -qE 'changed=0 .*failed=0' /tmp/home-server-second-run.txt && echo "IDEMPOTENT: OK" || die "IDEMPOTENT: NOT OK (the second run changed something; see $LOG)"
+if grep -qE 'changed=0 .*failed=0' /tmp/home-server-second-run.txt; then
+  echo "IDEMPOTENT: OK"
+else
+  die "IDEMPOTENT: NOT OK (the second run changed something; see $LOG)"
+fi
 
 cat <<'TXT'
 
