@@ -9,7 +9,7 @@ if [ "${HS_MODE:-hello}" = hello ]; then
   [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ] || { echo 'Run at the Ubuntu console for firewall changes.' >&2; exit 1; }
   ADMIN=${SUDO_USER:-}
   [ -n "$ADMIN" ] && [ "$ADMIN" != root ] || { echo 'Run sudo as your normal Ubuntu user.' >&2; exit 1; }
-  HS_HELLO_REF=${HS_HELLO_REF:-3f9cc5b4dac6002a0bcea6db91024a635ae67dfa}
+  HS_HELLO_REF=${HS_HELLO_REF:-27d28c3ffc953717814a9123f338980649c6e2b5}
   [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
   install -d -m 0755 /opt/home-server-hello
   exec 9>/run/lock/home-server-hello.lock
@@ -19,7 +19,12 @@ if [ "${HS_MODE:-hello}" = hello ]; then
   export DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=l
   timeout --foreground -k 10 300 apt-get update
   timeout --foreground -k 10 600 apt-get install -y ansible git gh ca-certificates
-  if ! sudo -u "$ADMIN" -H gh auth status --hostname github.com >/dev/null 2>&1; then
+  if [ -n "${HS_TEST_BUNDLE:-}" ]; then
+    if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
+      echo "Test bundles require a marked disposable VM." >&2; exit 1
+    fi
+    [ -f "$HS_TEST_BUNDLE" ] || { echo "Missing test bundle." >&2; exit 1; }
+  elif ! sudo -u "$ADMIN" -H gh auth status --hostname github.com >/dev/null 2>&1; then
     printf '\nAuthenticate the private configuration repo using the device code below.\n'
     sudo -u "$ADMIN" -H gh auth login --hostname github.com --git-protocol https --web
   fi
@@ -27,17 +32,28 @@ if [ "${HS_MODE:-hello}" = hello ]; then
   # shellcheck disable=SC2016
   HELPER='!f() { echo username=x-access-token; echo "password=$(sudo -u '"$ADMIN"' -H gh auth token)"; }; f'
   hello_git() { timeout --foreground -k 10 180 git -c credential.helper= -c "credential.helper=$HELPER" "$@"; }
+  REPOSITORY=${HS_TEST_BUNDLE:-https://github.com/rajadhi/home-server.git}
   SOURCE=/opt/home-server-hello/source
   if [ ! -d "$SOURCE/.git" ]; then
-    hello_git clone --no-checkout https://github.com/rajadhi/home-server.git "$SOURCE"
+    hello_git clone --no-checkout "$REPOSITORY" "$SOURCE"
   fi
-  hello_git -C "$SOURCE" fetch origin "$HS_HELLO_REF"
+  if [ -n "${HS_TEST_BUNDLE:-}" ]; then
+    hello_git -C "$SOURCE" fetch "$REPOSITORY" HEAD
+  else
+    hello_git -C "$SOURCE" fetch origin "$HS_HELLO_REF"
+  fi
   git -C "$SOURCE" checkout --detach "$HS_HELLO_REF"
   test "$(git -C "$SOURCE" rev-parse HEAD)" = "$HS_HELLO_REF"
   export ANSIBLE_CONFIG="$SOURCE/ansible/hello.cfg" ANSIBLE_COLLECTIONS_PATH=/opt/home-server-hello/collections
   timeout --foreground -k 10 300 ansible-galaxy collection install -r "$SOURCE/ansible/hello-requirements.yml" -p "$ANSIBLE_COLLECTIONS_PATH"
+  export HS_APPLY_REVISION="$HS_HELLO_REF"
+  EXTRA=()
+  if [ -n "${HS_HELLO_LAN:-}" ]; then
+    LAN_JSON=$(python3 -c 'import ipaddress,json,os; print(json.dumps({"hello_world_lan": str(ipaddress.IPv4Network(os.environ["HS_HELLO_LAN"]))}))')
+    EXTRA=(-e "$LAN_JSON")
+  fi
   cd "$SOURCE/ansible"
-  timeout --foreground -k 15 900 ansible-playbook -i localhost, -c local hello-world.yml
+  timeout --foreground -k 15 900 ansible-playbook -i localhost, -c local hello-world.yml "${EXTRA[@]}"
   printf '\nReady: http://<ubuntu-ip>:17283/\nLog: /var/log/home-server-hello.log\n'
   exit 0
 fi
