@@ -1,0 +1,11 @@
+[Unit]
+Description=Check the home-server pilot message every minute
+
+[Timer]
+OnBootSec=20s
+OnUnitInactiveSec=60s
+AccuracySec=1s
+Unit=home-server-pilot.service
+
+[Install]
+WantedBy=timers.target
