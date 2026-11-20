@@ -1,0 +1,12 @@
+[Unit]
+Description=Fetch and verify the harmless home-server pilot message
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+UMask=0077
+NoNewPrivileges=yes
+Environment=PYTHONNOUSERSITE=1
+ExecStart=/usr/bin/python3 %h/.local/lib/home-server-pilot/runner.py run
+TimeoutStartSec=90
