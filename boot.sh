@@ -2,14 +2,20 @@
 # Default milestone: Ansible runs on Ubuntu. Use HS_MODE=full for the legacy rebuild.
 if [ "${HS_MODE:-hello}" = hello ]; then
   set -euo pipefail
-  [ "$(id -u)" -eq 0 ] || { echo 'Run with sudo from the Ubuntu console.' >&2; exit 1; }
+  [ "$(id -u)" -eq 0 ] || { echo 'Run with sudo on Ubuntu through the generated ssh -t command.' >&2; exit 1; }
   # shellcheck source=/dev/null
   . /etc/os-release
   [ "$ID" = ubuntu ] && [ "$VERSION_ID" = 26.04 ] || { echo 'Requires Ubuntu 26.04.' >&2; exit 1; }
-  [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ] || { echo 'Run at the Ubuntu console for firewall changes.' >&2; exit 1; }
+  # The owner authorises attended SSH for this milestone. Never infer attendance
+  # from sudo stripping SSH_* variables; the generated command sets an explicit marker.
+  if [ "${HS_ATTENDED_SSH:-0}" = 1 ]; then
+    [ -t 0 ] && [ -t 1 ] || { echo 'Attended SSH deployment requires an interactive terminal.' >&2; exit 1; }
+  else
+    [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ] || { echo 'Use the generated attended ssh -t deployment command.' >&2; exit 1; }
+  fi
   ADMIN=${SUDO_USER:-}
   [ -n "$ADMIN" ] && [ "$ADMIN" != root ] || { echo 'Run sudo as your normal Ubuntu user.' >&2; exit 1; }
-  HS_HELLO_REF=${HS_HELLO_REF:-e18027d5493f3c39a6391cfb80e16a6ff983779b}
+  HS_HELLO_REF=${HS_HELLO_REF:-1032155ab540cc3003ea6c0356d2a47d00e50fc3}
   [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
   install -d -m 0755 /opt/home-server-hello
   exec 9>/run/lock/home-server-hello.lock
