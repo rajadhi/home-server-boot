@@ -9,7 +9,7 @@ if [ "${HS_MODE:-hello}" = hello ]; then
   [ -z "${SSH_CONNECTION:-}${SSH_CLIENT:-}" ] || { echo 'Run at the Ubuntu console for firewall changes.' >&2; exit 1; }
   ADMIN=${SUDO_USER:-}
   [ -n "$ADMIN" ] && [ "$ADMIN" != root ] || { echo 'Run sudo as your normal Ubuntu user.' >&2; exit 1; }
-  HS_HELLO_REF=${HS_HELLO_REF:-ba223f271cdf909ab78b240295ce8c2a83cc354b}
+  HS_HELLO_REF=${HS_HELLO_REF:-e18027d5493f3c39a6391cfb80e16a6ff983779b}
   [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
   install -d -m 0755 /opt/home-server-hello
   exec 9>/run/lock/home-server-hello.lock
