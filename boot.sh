@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Transport only: validate, authenticate/download the pinned source, start Ansible.
+# Bootstrap: validate, install git/Ansible/gh if absent, authenticate/download the pinned source, start Ansible.
 set -euo pipefail
 [ "${HS_MODE:-hello}" = hello ] || { echo 'Only the Ansible-managed dashboard milestone is supported.' >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || { echo 'Run through the generated attended ssh -t command.' >&2; exit 1; }
@@ -13,10 +13,20 @@ else
 fi
 ADMIN=${SUDO_USER:-}
 [ -n "$ADMIN" ] && [ "$ADMIN" != root ] || { echo 'Run sudo as your normal Ubuntu user.' >&2; exit 1; }
-for prerequisite in ansible-playbook git; do
-  command -v "$prerequisite" >/dev/null || { echo "Missing prerequisite: $prerequisite. The launcher never installs software." >&2; exit 1; }
+# A fresh Ubuntu host may lack the runtime: install only these Ubuntu archive packages, then verify them.
+missing=()
+command -v git >/dev/null || missing+=(git)
+command -v ansible-playbook >/dev/null || missing+=(ansible)
+command -v gh >/dev/null || missing+=(gh)
+if [ "${#missing[@]}" -gt 0 ]; then
+  printf 'Installing bootstrap prerequisites: %s\n' "${missing[*]}"
+  DEBIAN_FRONTEND=noninteractive timeout --foreground -k 15 600 apt-get update -q
+  DEBIAN_FRONTEND=noninteractive timeout --foreground -k 15 600 apt-get install -y -q "${missing[@]}"
+fi
+for prerequisite in ansible-playbook git gh; do
+  command -v "$prerequisite" >/dev/null || { echo "Missing prerequisite after install: $prerequisite." >&2; exit 1; }
 done
-HS_HELLO_REF=${HS_HELLO_REF:-0558c6ef1596755856d77c7edb320f62651e9d7b}
+HS_HELLO_REF=${HS_HELLO_REF:-c8f55b9fa56c261f06e3f2647b3df45b0de54a40}
 [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
 if [ -n "${HS_TEST_BUNDLE:-}" ]; then
   if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
@@ -61,6 +71,9 @@ export HS_APPLY_REVISION="$HS_HELLO_REF"
 EXTRA=()
 if [ -n "${HS_HELLO_LAN:-}" ]; then
   EXTRA=(-e "hello_world_lan=$HS_HELLO_LAN")
+fi
+if [ -n "${HS_TEST_BUNDLE:-}" ] && [ -n "${HS_TEST_SONY_REPO:-}" ]; then
+  EXTRA+=(-e "sony_control_repo=$HS_TEST_SONY_REPO")
 fi
 printf 'Starting Ansible: controller prerequisites and pinned collections\n'
 timeout --foreground -k 15 600 ansible-playbook -i localhost, -c local "$SOURCE/ansible/controller.yml"
