@@ -16,14 +16,14 @@ ADMIN=${SUDO_USER:-}
 for prerequisite in ansible-playbook git; do
   command -v "$prerequisite" >/dev/null || { echo "Missing prerequisite: $prerequisite. The launcher never installs software." >&2; exit 1; }
 done
-HS_HELLO_REF=${HS_HELLO_REF:-689abb3cbe9044cf5c7163b2e4c249fdb9a14e31}
+HS_HELLO_REF=${HS_HELLO_REF:-0558c6ef1596755856d77c7edb320f62651e9d7b}
 [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
 if [ -n "${HS_TEST_BUNDLE:-}" ]; then
   if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
     echo 'Test bundles require a marked VM.' >&2; exit 1
   fi
   [ -f "$HS_TEST_BUNDLE" ] || { echo 'Missing test bundle.' >&2; exit 1; }
-else
+elif [ ! -f /etc/home-server-github/id_ed25519 ]; then
   command -v gh >/dev/null || { echo 'GitHub CLI must already be available for private source authentication.' >&2; exit 1; }
   if ! sudo -u "$ADMIN" -H gh auth status --hostname github.com >/dev/null 2>&1; then
     sudo -u "$ADMIN" -H gh auth login --hostname github.com --git-protocol https --web
@@ -32,7 +32,15 @@ fi
 # This deferred helper retrieves the owner's token without putting it on a command line.
 # shellcheck disable=SC2016
 HELPER='!f() { echo username=x-access-token; echo "password=$(sudo -u '"$ADMIN"' -H gh auth token)"; }; f'
-source_git() { timeout --foreground -k 10 180 git -c credential.helper= -c "credential.helper=$HELPER" "$@"; }
+source_git() {
+  if [ -z "${HS_TEST_BUNDLE:-}" ] && [ -f /etc/home-server-github/id_ed25519 ]; then
+    GIT_SSH_COMMAND='/usr/bin/ssh -i /etc/home-server-github/id_ed25519 -oIdentitiesOnly=yes -oBatchMode=yes -oIdentityAgent=none -oStrictHostKeyChecking=yes -oUserKnownHostsFile=/etc/home-server-github/known_hosts -oGlobalKnownHostsFile=/dev/null' \
+      timeout --foreground -k 10 180 git -c credential.helper= \
+      -c url.git@github.com:rajadhi/home-server.git.insteadOf=https://github.com/rajadhi/home-server.git "$@"
+  else
+    timeout --foreground -k 10 180 git -c credential.helper= -c "credential.helper=$HELPER" "$@"
+  fi
+}
 SOURCE=/opt/home-server-hello/source
 REPOSITORY=${HS_TEST_BUNDLE:-https://github.com/rajadhi/home-server.git}
 printf 'Downloading tested configuration %s\n' "$HS_HELLO_REF"
