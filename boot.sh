@@ -16,7 +16,7 @@ ADMIN=${SUDO_USER:-}
 for prerequisite in ansible-playbook git; do
   command -v "$prerequisite" >/dev/null || { echo "Missing prerequisite: $prerequisite. The launcher never installs software." >&2; exit 1; }
 done
-HS_HELLO_REF=${HS_HELLO_REF:-d408ce7748823c8e8d56dc158cf0379ca12f01b3}
+HS_HELLO_REF=${HS_HELLO_REF:-689abb3cbe9044cf5c7163b2e4c249fdb9a14e31}
 [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
 if [ -n "${HS_TEST_BUNDLE:-}" ]; then
   if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
