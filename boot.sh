@@ -26,7 +26,7 @@ fi
 for prerequisite in ansible-playbook git gh; do
   command -v "$prerequisite" >/dev/null || { echo "Missing prerequisite after install: $prerequisite." >&2; exit 1; }
 done
-HS_HELLO_REF=${HS_HELLO_REF:-dad550e600cb3812c7a63eada55ff58083d8a53f}
+HS_HELLO_REF=${HS_HELLO_REF:-6b8971d42494561c4133a03dcde04a246615c0b8}
 [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
 if [ -n "${HS_TEST_BUNDLE:-}" ]; then
   if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
@@ -71,9 +71,6 @@ export HS_APPLY_REVISION="$HS_HELLO_REF"
 EXTRA=()
 if [ -n "${HS_HELLO_LAN:-}" ]; then
   EXTRA=(-e "hello_world_lan=$HS_HELLO_LAN")
-fi
-if [ -n "${HS_TEST_BUNDLE:-}" ] && [ -n "${HS_TEST_SONY_REPO:-}" ]; then
-  EXTRA+=(-e "sony_control_repo=$HS_TEST_SONY_REPO")
 fi
 printf 'Starting Ansible: controller prerequisites and pinned collections\n'
 timeout --foreground -k 15 600 ansible-playbook -i localhost, -c local "$SOURCE/ansible/controller.yml"
