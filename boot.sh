@@ -26,7 +26,7 @@ fi
 for prerequisite in ansible-playbook git gh; do
   command -v "$prerequisite" >/dev/null || { echo "Missing prerequisite after install: $prerequisite." >&2; exit 1; }
 done
-HS_HELLO_REF=${HS_HELLO_REF:-35d37b90f985dcf38450eb34f173af8535f6c0b9}
+HS_HELLO_REF=${HS_HELLO_REF:-c94032ff8a585e74667918c736b45985c204f44a}
 [[ "$HS_HELLO_REF" =~ ^[0-9a-f]{40}$ ]] || { echo 'HS_HELLO_REF must be a full Git commit.' >&2; exit 1; }
 if [ -n "${HS_TEST_BUNDLE:-}" ]; then
   if [ ! -f /etc/home-server-test-vm ] || ! systemd-detect-virt --quiet; then
